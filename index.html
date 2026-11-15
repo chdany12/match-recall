@@ -108,6 +108,10 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .series-row[aria-pressed="true"] { background: var(--blue-side); color: #fff; }
 .series-row[aria-pressed="true"] span:first-child { color: inherit; }
 .series-empty { padding: 12px 10px; color: var(--haze); font-size: 0.9rem; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field span { font: 600 0.9rem var(--display); letter-spacing: 0.05em; color: var(--haze); }
+.picker select { font: inherit; width: 100%; min-width: 0; padding: 9px 8px; border-radius: 2px; border: 1px solid var(--rule); background: var(--rift); color: var(--chalk); }
 .picker-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
 
 /* Guess board */
@@ -222,10 +226,11 @@ const STR = {
     puzzles: (n) => `<b>${n}</b>games`,
     question: (i, n) => `Game ${i}`,
     guesses: "guesses", clues: "clues",
-    legendRight: "Right", legendNearRegion: "Close: same region, one year off, or one round off", legendNearSwap: "Close: that team played in it, on the other side; or one year off",
+    legendRight: "Right", legendNearRegion: "Close: right team on the other side, same region, or one year off", legendNearSwap: "Close: right team on the other side, or one year off",
     legendWrong: "Wrong", legendArrows: "↑ later · ↓ earlier",
     winner: "Winner", loser: "Loser", event: "Event", year: "Year", stage: "Stage",
-    empty: "Pick a series above. Your guesses line up here, colored by how close they are.",
+    empty: "Choose the teams and the year above. Your guesses line up here, colored by how close they are.",
+    choose: "Choose…", sameTeam: "Winner and loser can't be the same team.", tried: "You already tried that one.",
     filter: "Filter by team or year, e.g. SKT or 2019", left: (a, b) => `${a} of ${b} series left`, guess: "Guess", noMatch: "No match here.",
     giveUp: "Show me the answer",
     solvedIn: (n) => `Solved in ${n} guess${n === 1 ? "" : "es"}`, outOf: "Out of guesses", theAnswer: "The answer",
@@ -255,10 +260,11 @@ const STR = {
     puzzles: (n) => `<b>${n}</b>경기`,
     question: (i, n) => `${i}번 문제`,
     guesses: "시도", clues: "힌트",
-    legendRight: "정답", legendNearRegion: "근접: 같은 지역 · 1년 차이 · 한 라운드 차이", legendNearSwap: "근접: 맞는 팀이지만 승패가 반대 · 1년 차이",
+    legendRight: "정답", legendNearRegion: "근접: 승패가 반대 · 같은 지역 · 1년 차이", legendNearSwap: "근접: 맞는 팀이지만 승패가 반대 · 1년 차이",
     legendWrong: "오답", legendArrows: "↑ 더 나중 · ↓ 더 이전",
     winner: "승리 팀", loser: "패배 팀", event: "대회", year: "연도", stage: "라운드",
-    empty: "위에서 시리즈를 골라 보세요. 고른 답이 여기에 쌓이고, 정답과 얼마나 가까운지 색으로 알려 드립니다.",
+    empty: "위에서 팀과 연도를 골라 제출해 보세요. 고른 답이 여기에 쌓이고, 정답과 얼마나 가까운지 색으로 알려 드립니다.",
+    choose: "선택", sameTeam: "승리 팀과 패배 팀이 같아요.", tried: "이미 제출한 답이에요.",
     filter: "팀이나 연도로 찾기 (예: T1, 2019)", left: (a, b) => `남은 후보 ${a}개 (전체 ${b}개)`, guess: "제출", noMatch: "해당하는 시리즈가 없습니다.",
     giveUp: "정답 보기",
     solvedIn: (n) => `${n}번 만에 정답`, outOf: "기회를 모두 썼습니다", theAnswer: "정답",
@@ -315,7 +321,7 @@ const TEAMS = [
   ["blg", "Bilibili Gaming", "LPL", ["BLG"]],
   ["tes", "Top Esports", "LPL", ["TES"]],
   ["we", "Team WE", "LPL", ["WE"]],
-  ["wbg", "Weibo Gaming", "LPL", ["WBG", "Suning", "SN"]],
+  ["wbg", "Weibo Gaming", "LPL", ["Suning", "WBG", "SN"]],
   ["src", "Star Horn Royal Club", "LPL", ["Royal Club", "SHRC"]],
   ["omg", "OMG", "LPL", []],
   ["lng", "LNG Esports", "LPL", ["LNG"]],
@@ -404,8 +410,17 @@ const MODES = [
   const pool = META.map((m, i) => i).filter((i) => set.has(META[i].bank));
   const regions = new Set(bankIds.flatMap((i) => [TEAM[BANK[i].w].region, TEAM[BANK[i].l].region]));
   const groups = ["Worlds", "MSI", "LCK"].filter((g) => bankIds.some((i) => groupOf(BANK[i].event) === g));
-  const varies = (f) => new Set(bankIds.map((i) => f(BANK[i]))).size > 1;
-  return { ...mode, bankIds, pool, multiRegion: regions.size > 1, groups, showEvent: varies((b) => b.event), showStage: varies((b) => b.stage) };
+  // The guess is winner, loser and year chosen by the player, with no list of series to pick from (a list let
+  // players solve by elimination instead of memory). Event is asked only where the same matchup met twice in a year.
+  const pair = (b) => `${b.w}|${b.l}|${b.year}`;
+  const eventsOf = {};
+  bankIds.forEach((i) => (eventsOf[pair(BANK[i])] ??= new Set()).add(BANK[i].event));
+  const askEvent = Object.values(eventsOf).some((e) => e.size > 1);
+  const teams = [...new Set(bankIds.flatMap((i) => [BANK[i].w, BANK[i].l]))].sort((a, b) => TEAM[a].name.localeCompare(TEAM[b].name));
+  const ys = bankIds.map((i) => BANK[i].year);
+  const years = Array.from({ length: Math.max(...ys) - Math.min(...ys) + 1 }, (_, k) => Math.max(...ys) - k);
+  const events = ["Worlds", "MSI", "LCK Spring", "LCK Summer", "LCK"].filter((e) => bankIds.some((i) => BANK[i].event === e));
+  return { ...mode, bankIds, pool, multiRegion: regions.size > 1, groups, askEvent, teams, years, events };
 });
 const MODE = Object.fromEntries(MODES.map((m) => [m.id, m]));
 
@@ -415,7 +430,7 @@ let state = { screen: "home", run: null, seen: {} };
 try {
   const saved = JSON.parse(localStorage.getItem(SAVE_KEY));
   if (saved && typeof saved === "object") state = { ...state, ...saved };
-  if (state.run && (!MODE[state.run.mode] || state.run.ids.some((i) => !META[i]))) state = { ...state, screen: "home", run: null };
+  if (state.run && (!MODE[state.run.mode] || state.run.ids.some((i) => !META[i]) || state.run.answers.some((a) => a.grid.some((g) => typeof g !== "object")))) state = { ...state, screen: "home", run: null };
 } catch {}
 const save = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch {} };
 let fresh = null;
@@ -431,7 +446,7 @@ function startRun(modeId) {
   state.seen[modeId] = [...seen, ...ids.map((i) => GAMES[i].id)];
   state.run = { mode: modeId, ids, q: 0, answers: ids.map(() => ({ grid: [], done: false, gaveUp: false })) };
   state.screen = "play";
-  picker.tab = mode.groups[0]; picker.q = ""; picker.pick = null;
+  resetPicker();
   save(); render(); window.scrollTo({ top: 0 });
 }
 
@@ -439,25 +454,21 @@ function startRun(modeId) {
 const arrow = (target, guess) => (target > guess ? "↑" : target < guess ? "↓" : "");
 function teamCell(guessId, targetId, otherId, mode) {
   const g = TEAM[guessId], tg = TEAM[targetId];
-  const near = mode.multiRegion ? g.region === tg.region : guessId === otherId;
+  const near = guessId === otherId || (mode.multiRegion && g.region === tg.region);
   return { text: g.name, sub: mode.multiRegion ? t().regions[g.region] : "", cls: guessId === targetId ? "hit" : near ? "near" : "miss" };
 }
 const yearCell = (guess, target) => { const d = Math.abs(guess - target); return { text: `${guess} ${arrow(target, guess)}`.trim(), cls: d === 0 ? "hit" : d === 1 ? "near" : "miss" }; };
-const stageCell = (guess, target) => { const d = Math.abs(guess - target); return { text: `${t().stages[guess]} ${arrow(target, guess)}`.trim(), cls: d === 0 ? "hit" : d === 1 ? "near" : "miss" }; };
 const eventCell = (guess, target) => ({ text: t().events[guess], cls: guess === target ? "hit" : groupOf(guess) === "LCK" && groupOf(target) === "LCK" ? "near" : "miss" });
 const COLS = (mode) => [
   { key: "winner", cell: (b, m) => teamCell(b.w, m.winner, m.loser, mode) },
   { key: "loser", cell: (b, m) => teamCell(b.l, m.loser, m.winner, mode) },
-  ...(mode.showEvent ? [{ key: "event", cell: (b, m) => eventCell(b.event, m.event) }] : []),
+  ...(mode.askEvent ? [{ key: "event", cell: (b, m) => eventCell(b.event, m.event) }] : []),
   { key: "year", cell: (b, m) => yearCell(b.year, m.year) },
-  ...(mode.showStage ? [{ key: "stage", cell: (b, m) => stageCell(b.stage, m.stage) }] : []),
 ];
-// Drops only what a cell states outright: a wrong value goes, a right value locks in.
-const fits = (cand, guessed, target) => (guessed === target ? cand === target : cand !== guessed);
-const stillPossible = (c, g, m) => fits(c.w, g.w, m.winner) && fits(c.l, g.l, m.loser) && fits(c.event, g.event, m.event) && fits(c.year, g.year, m.year) && fits(c.stage, g.stage, m.stage);
-const remaining = (mode, a, m) => mode.bankIds.filter((i) => !a.grid.includes(i) && a.grid.every((gi) => stillPossible(BANK[i], BANK[gi], m)));
+// A guess is { w, l, year, event, ok }. Right when every field the form asks for matches.
+const isRight = (g, m, mode) => g.w === m.winner && g.l === m.loser && g.year === m.year && (!mode.askEvent || g.event === m.event);
 const HINTS = ["draft", "bans", "series", "items", "loserAce", "winnerAce", "trivia"];
-const wrongCount = (a, m) => a.grid.filter((i) => i !== m.bank).length;
+const wrongCount = (a) => a.grid.filter((g) => !g.ok).length;
 const cluesEarned = (a, m) => Math.min(HINTS.length, 1 + wrongCount(a, m));
 const hintsOpen = (a, m) => (a.done ? HINTS.length : cluesEarned(a, m));
 const solved = (a) => a.done && !a.gaveUp;
@@ -468,7 +479,6 @@ const dotClass = (a) => (!a.done ? "" : !solved(a) ? "miss" : a.grid.length <= 3
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-const SEARCH_TEXT = BANK.map((b) => norm([b.names, b.year, b.event, STR.ko.events[b.event], TEAM[b.w].name, TEAM[b.l].name, ...TEAM[b.w].aka, ...TEAM[b.l].aka].join(" ")));
 
 function renderHome() {
   const card = (mode) => `<button class="mode" data-mode="${mode.id}" ${mode.soon ? "disabled" : ""}>
@@ -516,30 +526,33 @@ function renderHints(g, a, m) {
     : `<div class="clue locked"><div class="clue-head"><span class="k">${T.clue(i + 1)}</span><h3>${T.hint[k]}</h3><span class="when">${T.unlocks(i)}</span></div></div>`).join("")}</aside>`;
 }
 
-const picker = { tab: "Worlds", q: "", pick: null };
+const picker = { w: "", l: "", year: "", event: "" };
+const resetPicker = () => Object.assign(picker, { w: "", l: "", year: "", event: "" });
+const REGION_ORDER = ["LCK", "LPL", "LEC", "LCS", "PCS", "VCS"];
+// Show a former name where people may know the team by it: "T1 (SK Telecom T1)".
+const teamLabel = (id) => { const x = TEAM[id], old = x.aka[0]; return old && old.length > 3 && !x.name.includes(old) ? `${x.name} (${old})` : x.name; };
+const opt = (v, label, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? " selected" : ""}>${esc(label)}</option>`;
+function teamOptions(mode, cur) {
+  const o = (ids) => ids.map((id) => opt(id, teamLabel(id), cur)).join("");
+  if (!mode.multiRegion) return o(mode.teams);
+  return REGION_ORDER.map((r) => [r, mode.teams.filter((id) => TEAM[id].region === r)]).filter(([, ids]) => ids.length)
+    .map(([r, ids]) => `<optgroup label="${esc(t().regions[r])}">${o(ids)}</optgroup>`).join("");
+}
+const pickedGuess = (mode, m) => ({ w: picker.w, l: picker.l, year: Number(picker.year), event: mode.askEvent ? picker.event : m.event });
+function pickProblem(mode, a, m) {
+  if (!picker.w || !picker.l || !picker.year || (mode.askEvent && !picker.event)) return "incomplete";
+  if (picker.w === picker.l) return t().sameTeam;
+  const g = pickedGuess(mode, m);
+  if (a.grid.some((x) => x.w === g.w && x.l === g.l && x.year === g.year && x.event === g.event)) return t().tried;
+  return "";
+}
 function renderPicker() {
-  const list = $("#series-list");
-  if (!list) return;
-  const run = state.run, mode = MODE[run.mode], a = run.answers[run.q], m = META[run.ids[run.q]], T = t();
-  const left = remaining(mode, a, m);
-  const terms = picker.q.split(/\s+/).map(norm).filter(Boolean);
-  const shown = left.filter((i) => terms.every((x) => SEARCH_TEXT[i].includes(x)));
-  const inTab = (g, ids) => ids.filter((i) => groupOf(BANK[i].event) === g);
-  if (!inTab(picker.tab, left).length) picker.tab = mode.groups.find((g) => inTab(g, left).length) || mode.groups[0];
-  $("#tabs").innerHTML = mode.groups.length < 2 ? "" : mode.groups.map((g) =>
-    `<button type="button" data-tab="${g}" aria-pressed="${picker.tab === g}" ${inTab(g, left).length ? "" : "disabled"}>${g === "Worlds" ? T.events.Worlds : g}<span class="n">${inTab(g, shown).length}</span></button>`).join("");
-  const rows = inTab(picker.tab, shown).sort((x, y) => BANK[y].year - BANK[x].year || BANK[y].stage - BANK[x].stage || BANK[y].event.localeCompare(BANK[x].event));
-  if (!rows.includes(picker.pick)) picker.pick = null;
-  let year = null;
-  list.innerHTML = rows.map((i) => {
-    const b = BANK[i];
-    const head = b.year === year ? "" : `<div class="series-year">${b.year}</div>`;
-    year = b.year;
-    const tag = b.event.startsWith("LCK") ? T.events[b.event] : T.stages[b.stage];
-    return `${head}<button type="button" class="series-row" data-bank="${i}" aria-pressed="${picker.pick === i}"><span>${esc(tag)}</span><span>${esc(b.names)}</span></button>`;
-  }).join("") || `<p class="series-empty">${T.noMatch}</p>`;
-  $("#left").textContent = T.left(left.length, mode.bankIds.length);
-  $("#guess-btn").disabled = picker.pick === null;
+  const btn = $("#guess-btn");
+  if (!btn) return;
+  const run = state.run, mode = MODE[run.mode], a = run.answers[run.q], m = META[run.ids[run.q]];
+  const problem = pickProblem(mode, a, m);
+  btn.disabled = problem !== "";
+  $("#pick-note").textContent = problem === "incomplete" ? "" : problem;
 }
 
 function renderPlay() {
@@ -549,11 +562,13 @@ function renderPlay() {
   const head = `<div class="strip"><div><p class="mode-name">${esc(mode.name[lang])}</p><h2>${T.question(run.q + 1, run.ids.length)}</h2></div>
     <div class="counter"><span><b>${a.grid.length}</b>/ ${MAX_GUESSES} ${T.guesses}</span><span><b>${hintsOpen(a, m)}</b>/ ${HINTS.length} ${T.clues}</span><span class="pips" aria-label="${run.q + 1} / ${run.ids.length}">${pips}</span></div></div>`;
   const legend = `<p class="legend"><span><span class="sw hit"></span>${T.legendRight}</span><span><span class="sw near"></span>${mode.multiRegion ? T.legendNearRegion : T.legendNearSwap}</span><span><span class="sw miss"></span>${T.legendWrong}</span><span>${T.legendArrows}</span></p>`;
-  const rows = a.grid.map((bi, gi) => `<tr>${cols.map((c) => { const x = c.cell(BANK[bi], m); return `<td class="${x.cls}${fresh === gi ? " fresh" : ""}">${esc(x.text)}${x.sub ? `<br><small>${esc(x.sub)}</small>` : ""}</td>`; }).join("")}</tr>`).join("");
-  const form = a.done ? "" : `<form class="picker"><div class="tabs" id="tabs"></div>
-    <input type="text" id="series" placeholder="${esc(T.filter)}" autocomplete="off" aria-label="${esc(T.filter)}" value="${esc(picker.q)}">
-    <div class="series-list" id="series-list"></div>
-    <div class="picker-foot"><span class="small muted" id="left"></span><button class="btn" type="submit" id="guess-btn" disabled>${T.guess}</button></div></form>`;
+  const rows = a.grid.map((guessed, gi) => `<tr>${cols.map((c) => { const x = c.cell(guessed, m); return `<td class="${x.cls}${fresh === gi ? " fresh" : ""}">${esc(x.text)}${x.sub ? `<br><small>${esc(x.sub)}</small>` : ""}</td>`; }).join("")}</tr>`).join("");
+  const field = (key, label, options) => `<label class="field"><span>${label}</span><select data-field="${key}"><option value="">${T.choose}</option>${options}</select></label>`;
+  const form = a.done ? "" : `<form class="picker"><div class="fields">
+    ${field("w", T.winner, teamOptions(mode, picker.w))}${field("l", T.loser, teamOptions(mode, picker.l))}
+    ${mode.askEvent ? field("event", T.event, mode.events.map((e) => opt(e, T.events[e], picker.event)).join("")) : ""}
+    ${field("year", T.year, mode.years.map((y) => opt(y, y, picker.year)).join(""))}</div>
+    <div class="picker-foot"><span class="small muted" id="pick-note"></span><button class="btn" type="submit" id="guess-btn" disabled>${T.guess}</button></div></form>`;
   const last = run.q === run.ids.length - 1;
   const result = !a.done ? "" : `<div class="result${solved(a) ? "" : " gave-up"}">
     <p class="verdict">${solved(a) ? T.solvedIn(a.grid.length) : a.grid.length >= MAX_GUESSES ? T.outOf : T.theAnswer}</p>
@@ -596,32 +611,30 @@ function render() {
 }
 
 // ---- Events -------------------------------------------------------------
-function guess(bi) {
-  const run = state.run, a = run.answers[run.q], m = META[run.ids[run.q]];
-  a.grid.push(bi);
+function guess() {
+  const run = state.run, mode = MODE[run.mode], a = run.answers[run.q], m = META[run.ids[run.q]];
+  if (pickProblem(mode, a, m)) return;
+  const g = pickedGuess(mode, m);
+  g.ok = isRight(g, m, mode);
+  a.grid.push(g);
   fresh = a.grid.length - 1;
-  picker.pick = null; picker.q = "";
-  if (bi === m.bank) a.done = true;
+  if (g.ok) a.done = true;
   else if (a.grid.length >= MAX_GUESSES) { a.done = true; a.gaveUp = true; }
   save(); render(); fresh = null;
 }
-document.addEventListener("submit", (e) => { e.preventDefault(); if (picker.pick !== null) guess(picker.pick); });
+document.addEventListener("submit", (e) => { e.preventDefault(); guess(); });
 document.addEventListener("click", (e) => {
   const langBtn = e.target.closest("[data-lang]");
   if (langBtn) { lang = langBtn.dataset.lang; try { localStorage.setItem("match-recall:lang", lang); } catch {} render(); return; }
   const modeBtn = e.target.closest("[data-mode]");
   if (modeBtn) { startRun(modeBtn.dataset.mode); return; }
-  const tab = e.target.closest("[data-tab]");
-  if (tab) { picker.tab = tab.dataset.tab; picker.pick = null; renderPicker(); return; }
-  const row = e.target.closest("[data-bank]");
-  if (row) { picker.pick = Number(row.dataset.bank); renderPicker(); return; }
   const id = e.target.closest("button")?.id;
   if (id === "home-btn" || id === "to-home") { if (id === "to-home" || state.screen === "results") state.run = null; state.screen = "home"; save(); render(); return; }
   if (id === "resume-btn") { state.screen = state.run.answers.every((x) => x.done) && state.run.q === state.run.ids.length - 1 ? "results" : "play"; save(); render(); return; }
   if (id === "give-up") { const a = state.run.answers[state.run.q]; a.done = true; a.gaveUp = true; save(); render(); return; }
   if (id === "next-btn") {
     const run = state.run;
-    if (run.q < run.ids.length - 1) { run.q++; const mode = MODE[run.mode]; picker.tab = mode.groups[0]; picker.q = ""; picker.pick = null; }
+    if (run.q < run.ids.length - 1) { run.q++; resetPicker(); }
     else state.screen = "results";
     save(); render(); window.scrollTo({ top: 0 }); return;
   }
@@ -631,7 +644,7 @@ async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); el.textContent = t().copied; el.className = "status ok"; }
   catch { el.textContent = t().copyFail; el.className = "status"; }
 }
-document.addEventListener("input", (e) => { if (e.target.id === "series") { picker.q = e.target.value; renderPicker(); } });
+document.addEventListener("change", (e) => { const f = e.target.dataset?.field; if (f) { picker[f] = e.target.value; renderPicker(); } });
 
 render();
 </script>
