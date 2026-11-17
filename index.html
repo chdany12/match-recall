@@ -111,7 +111,12 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 .field { display: grid; gap: 4px; min-width: 0; }
 .field span { font: 600 0.9rem var(--display); letter-spacing: 0.05em; color: var(--haze); }
-.picker select { font: inherit; width: 100%; min-width: 0; padding: 9px 8px; border-radius: 2px; border: 1px solid var(--rule); background: var(--rift); color: var(--chalk); }
+.range { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.range h2 { font: 500 0.95rem var(--body); color: var(--haze); margin-right: 4px; }
+.range select { width: auto; min-width: 6.5rem; }
+.range .dash { color: var(--haze); }
+.picker select { width: 100%; }
+.picker select, .range select { font: inherit; min-width: 0; padding: 9px 8px; border-radius: 2px; border: 1px solid var(--rule); background: var(--rift); color: var(--chalk); }
 .picker-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
 
 /* Guess board */
@@ -223,7 +228,8 @@ const STR = {
     facts: ["games a round", "guesses each", "clues"],
     resume: (m, i, n) => `Continue ${m} · question ${i} of ${n}`,
     pickMode: "Choose a mode", leagues: "Pick a league", teams: "Or follow a team", soon: "Coming soon",
-    puzzles: (n) => `<b>${n}</b>games`,
+    puzzles: (n) => `<b>${n}</b>games`, none: "None in these years",
+    years: "Years", yearFrom: "From year", yearTo: "To year", allYears: "All years",
     question: (i, n) => `Game ${i}`,
     guesses: "guesses", clues: "clues",
     legendRight: "Right", legendNearRegion: "Close: right team on the other side, same region, or one year off", legendNearSwap: "Close: right team on the other side, or one year off",
@@ -257,7 +263,8 @@ const STR = {
     facts: ["문제", "번의 기회", "개의 힌트"],
     resume: (m, i, n) => `이어서 하기 · ${m} (${i}/${n}번째 문제)`,
     pickMode: "모드 선택", leagues: "대회별", teams: "팀별", soon: "준비 중",
-    puzzles: (n) => `<b>${n}</b>경기`,
+    puzzles: (n) => `<b>${n}</b>경기`, none: "이 기간엔 없음",
+    years: "연도 범위", yearFrom: "시작 연도", yearTo: "끝 연도", allYears: "전체 연도",
     question: (i, n) => `${i}번 문제`,
     guesses: "시도", clues: "힌트",
     legendRight: "정답", legendNearRegion: "근접: 승패가 반대 · 같은 지역 · 1년 차이", legendNearSwap: "근접: 맞는 팀이지만 승패가 반대 · 1년 차이",
@@ -404,8 +411,20 @@ const MODES = [
   { id: "lpl", kind: "league", name: { en: "LPL", ko: "LPL" }, sub: { en: "China", ko: "중국 리그" }, soon: true, bank: () => false },
   { id: "t1", kind: "team", name: { en: "T1", ko: "T1" }, sub: { en: "Including the SK Telecom T1 years", ko: "SK텔레콤 T1 시절 포함" }, bank: hasTeam("t1") },
   { id: "geng", kind: "team", name: { en: "Gen.G", ko: "젠지" }, sub: { en: "Including Samsung Galaxy and KSV", ko: "삼성 갤럭시, KSV 시절 포함" }, bank: hasTeam("geng") },
-].map((mode) => {
-  const bankIds = BANK.map((b, i) => i).filter((i) => mode.bank(BANK[i]));
+];
+const MODE = Object.fromEntries(MODES.map((m) => [m.id, m]));
+const ALL_YEARS = BANK.map((b) => b.year);
+const YEAR_MIN = Math.min(...ALL_YEARS), YEAR_MAX = Math.max(...ALL_YEARS);
+const FULL_RANGE = { from: YEAR_MIN, to: YEAR_MAX };
+const isFull = (r) => r.from <= YEAR_MIN && r.to >= YEAR_MAX;
+// A mode narrowed to the chosen years: its puzzles, and the teams, years and events the guess form offers.
+const scoped = {};
+function scope(id, r = FULL_RANGE) {
+  const key = `${id}|${r.from}|${r.to}`;
+  if (scoped[key]) return scoped[key];
+  const mode = MODE[id];
+  const bankIds = BANK.map((b, i) => i).filter((i) => mode.bank(BANK[i]) && BANK[i].year >= r.from && BANK[i].year <= r.to);
+  if (!bankIds.length) return (scoped[key] = { ...mode, bankIds, pool: [], range: r });
   const set = new Set(bankIds);
   const pool = META.map((m, i) => i).filter((i) => set.has(META[i].bank));
   const regions = new Set(bankIds.flatMap((i) => [TEAM[BANK[i].w].region, TEAM[BANK[i].l].region]));
@@ -420,16 +439,19 @@ const MODES = [
   const ys = bankIds.map((i) => BANK[i].year);
   const years = Array.from({ length: Math.max(...ys) - Math.min(...ys) + 1 }, (_, k) => Math.max(...ys) - k);
   const events = ["Worlds", "MSI", "LCK Spring", "LCK Summer", "LCK"].filter((e) => bankIds.some((i) => BANK[i].event === e));
-  return { ...mode, bankIds, pool, multiRegion: regions.size > 1, groups, askEvent, teams, years, events };
-});
-const MODE = Object.fromEntries(MODES.map((m) => [m.id, m]));
+  return (scoped[key] = { ...mode, bankIds, pool, multiRegion: regions.size > 1, groups, askEvent, teams, years, events, range: r });
+}
+const runMode = (run) => scope(run.mode, run.range || FULL_RANGE);
+const modeLabel = (mode) => mode.name[lang] + (isFull(mode.range) ? "" : ` · ${mode.range.from === mode.range.to ? mode.range.from : `${mode.range.from}–${mode.range.to}`}`);
 
 // ---- State ----------------------------------------------------------------
 const SAVE_KEY = "match-recall:v2";
-let state = { screen: "home", run: null, seen: {} };
+let state = { screen: "home", run: null, seen: {}, range: { ...FULL_RANGE } };
 try {
   const saved = JSON.parse(localStorage.getItem(SAVE_KEY));
   if (saved && typeof saved === "object") state = { ...state, ...saved };
+  const r = state.range;
+  if (!r || !(r.from >= YEAR_MIN && r.to <= YEAR_MAX && r.from <= r.to)) state.range = { ...FULL_RANGE };
   if (state.run && (!MODE[state.run.mode] || state.run.ids.some((i) => !META[i]) || state.run.answers.some((a) => a.grid.some((g) => typeof g !== "object")))) state = { ...state, screen: "home", run: null };
 } catch {}
 const save = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch {} };
@@ -437,14 +459,15 @@ let fresh = null;
 
 // Five puzzles from the mode, games you haven't seen yet first.
 function startRun(modeId) {
-  const mode = MODE[modeId];
+  const mode = scope(modeId, state.range);
+  if (!mode.pool.length) return;
   const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   let seen = new Set(state.seen[modeId] || []);
   let unseen = mode.pool.filter((i) => !seen.has(GAMES[i].id));
   if (unseen.length < RUN_LENGTH) { seen = new Set(); unseen = [...mode.pool]; }
   const ids = shuffle(unseen).slice(0, RUN_LENGTH);
   state.seen[modeId] = [...seen, ...ids.map((i) => GAMES[i].id)];
-  state.run = { mode: modeId, ids, q: 0, answers: ids.map(() => ({ grid: [], done: false, gaveUp: false })) };
+  state.run = { mode: modeId, range: { ...state.range }, ids, q: 0, answers: ids.map(() => ({ grid: [], done: false, gaveUp: false })) };
   state.screen = "play";
   resetPicker();
   save(); render(); window.scrollTo({ top: 0 });
@@ -481,14 +504,21 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
 function renderHome() {
-  const card = (mode) => `<button class="mode" data-mode="${mode.id}" ${mode.soon ? "disabled" : ""}>
+  const card = (base) => { const mode = scope(base.id, state.range), off = mode.soon || !mode.pool.length;
+    return `<button class="mode" data-mode="${mode.id}" ${off ? "disabled" : ""}>
     <span class="mname">${esc(mode.name[lang])}</span><span class="sub">${esc(mode.sub[lang])}</span>
-    <span class="count">${mode.soon ? t().soon : t().puzzles(mode.pool.length)}</span></button>`;
+    <span class="count">${mode.soon ? t().soon : mode.pool.length ? t().puzzles(mode.pool.length) : t().none}</span></button>`; };
+  const yearOpts = (cur) => Array.from({ length: YEAR_MAX - YEAR_MIN + 1 }, (_, k) => YEAR_MIN + k).map((y) => opt(y, y, cur)).join("");
+  const range = `<section class="range"><h2>${t().years}</h2>
+    <select data-range="from" aria-label="${esc(t().yearFrom)}">${yearOpts(state.range.from)}</select><span class="dash">–</span>
+    <select data-range="to" aria-label="${esc(t().yearTo)}">${yearOpts(state.range.to)}</select>
+    ${isFull(state.range) ? "" : `<button class="btn ghost" id="all-years">${t().allYears}</button>`}</section>`;
   const run = state.run;
-  const resume = run && state.screen === "home" ? `<div class="actions resume"><button class="btn" id="resume-btn">${t().resume(MODE[run.mode].name[lang], Math.min(run.q + 1, run.ids.length), run.ids.length)}</button></div>` : "";
+  const resume = run && state.screen === "home" ? `<div class="actions resume"><button class="btn" id="resume-btn">${t().resume(modeLabel(runMode(run)), Math.min(run.q + 1, run.ids.length), run.ids.length)}</button></div>` : "";
   const f = t().facts;
   return `<section class="hero"><h1>${t().headline}</h1><p>${t().intro}</p>
     <p class="facts"><span><b>${RUN_LENGTH}</b>${f[0]}</span><span><b>${MAX_GUESSES}</b>${f[1]}</span><span><b>${HINTS.length}</b>${f[2]}</span></p>${resume}</section>
+    ${range}
     <section class="modes-block" aria-label="${t().pickMode}"><h2>${t().leagues}</h2><div class="modes">${MODES.filter((m) => m.kind === "league").map(card).join("")}</div></section>
     <section class="modes-block"><h2>${t().teams}</h2><div class="modes">${MODES.filter((m) => m.kind === "team").map(card).join("")}</div></section>`;
 }
@@ -549,17 +579,17 @@ function pickProblem(mode, a, m) {
 function renderPicker() {
   const btn = $("#guess-btn");
   if (!btn) return;
-  const run = state.run, mode = MODE[run.mode], a = run.answers[run.q], m = META[run.ids[run.q]];
+  const run = state.run, mode = runMode(run), a = run.answers[run.q], m = META[run.ids[run.q]];
   const problem = pickProblem(mode, a, m);
   btn.disabled = problem !== "";
   $("#pick-note").textContent = problem === "incomplete" ? "" : problem;
 }
 
 function renderPlay() {
-  const run = state.run, mode = MODE[run.mode], i = run.ids[run.q], g = GAMES[i], a = run.answers[run.q], m = META[i], T = t();
+  const run = state.run, mode = runMode(run), i = run.ids[run.q], g = GAMES[i], a = run.answers[run.q], m = META[i], T = t();
   const cols = COLS(mode);
   const pips = run.answers.map((x, k) => `<span class="pip ${k === run.q && !x.done ? "cur" : dotClass(x)}"></span>`).join("");
-  const head = `<div class="strip"><div><p class="mode-name">${esc(mode.name[lang])}</p><h2>${T.question(run.q + 1, run.ids.length)}</h2></div>
+  const head = `<div class="strip"><div><p class="mode-name">${esc(modeLabel(mode))}</p><h2>${T.question(run.q + 1, run.ids.length)}</h2></div>
     <div class="counter"><span><b>${a.grid.length}</b>/ ${MAX_GUESSES} ${T.guesses}</span><span><b>${hintsOpen(a, m)}</b>/ ${HINTS.length} ${T.clues}</span><span class="pips" aria-label="${run.q + 1} / ${run.ids.length}">${pips}</span></div></div>`;
   const legend = `<p class="legend"><span><span class="sw hit"></span>${T.legendRight}</span><span><span class="sw near"></span>${mode.multiRegion ? T.legendNearRegion : T.legendNearSwap}</span><span><span class="sw miss"></span>${T.legendWrong}</span><span>${T.legendArrows}</span></p>`;
   const rows = a.grid.map((guessed, gi) => `<tr>${cols.map((c) => { const x = c.cell(guessed, m); return `<td class="${x.cls}${fresh === gi ? " fresh" : ""}">${esc(x.text)}${x.sub ? `<br><small>${esc(x.sub)}</small>` : ""}</td>`; }).join("")}</tr>`).join("");
@@ -582,17 +612,17 @@ function renderPlay() {
 }
 
 function shareText() {
-  const run = state.run, mode = MODE[run.mode];
+  const run = state.run, mode = runMode(run);
   const total = run.answers.reduce((s, a) => s + pointsFor(a), 0);
   const sq = { hit: "🟩", near: "🟨", miss: "⬛" };
-  return `Match Recall · ${mode.name[lang]} · ${total}/${RUN_LENGTH * MAX_GUESSES}\n${run.answers.map((a) => sq[dotClass(a)]).join("")}\n${run.answers.map((a) => (solved(a) ? a.grid.length : "X")).join(" · ")}`;
+  return `Match Recall · ${modeLabel(mode)} · ${total}/${run.ids.length * MAX_GUESSES}\n${run.answers.map((a) => sq[dotClass(a)]).join("")}\n${run.answers.map((a) => (solved(a) ? a.grid.length : "X")).join(" · ")}`;
 }
 
 function renderResults() {
-  const run = state.run, mode = MODE[run.mode], T = t();
+  const run = state.run, mode = runMode(run), T = t();
   const total = run.answers.reduce((s, a) => s + pointsFor(a), 0);
-  return `<section class="final"><div><p class="mode-name">${esc(mode.name[lang])} · ${T.roundOver}</p>
-    <p class="total">${total}<span> / ${RUN_LENGTH * MAX_GUESSES} ${T.points}</span></p></div>
+  return `<section class="final"><div><p class="mode-name">${esc(modeLabel(mode))} · ${T.roundOver}</p>
+    <p class="total">${total}<span> / ${run.ids.length * MAX_GUESSES} ${T.points}</span></p></div>
     <ol class="qlist">${run.answers.map((a, k) => { const m = META[run.ids[k]]; return `<li><span class="qdot ${dotClass(a)}">${k + 1}</span>
       <span><strong>${esc(T.answerLabel(m))}</strong><br><span class="small muted">${esc(T.beat(m.winnerName, m.loserName))}</span></span>
       <span class="qres">${T.resultLine(a.grid.length, solved(a))}</span></li>`; }).join("")}</ol>
@@ -612,7 +642,7 @@ function render() {
 
 // ---- Events -------------------------------------------------------------
 function guess() {
-  const run = state.run, mode = MODE[run.mode], a = run.answers[run.q], m = META[run.ids[run.q]];
+  const run = state.run, mode = runMode(run), a = run.answers[run.q], m = META[run.ids[run.q]];
   if (pickProblem(mode, a, m)) return;
   const g = pickedGuess(mode, m);
   g.ok = isRight(g, m, mode);
@@ -638,12 +668,21 @@ document.addEventListener("click", (e) => {
     else state.screen = "results";
     save(); render(); window.scrollTo({ top: 0 }); return;
   }
+  if (id === "all-years") { state.range = { ...FULL_RANGE }; save(); render(); return; }
   if (id === "copy-share") copy($("#share-text").textContent, $("#share-status"));
 });
 async function copy(text, el) {
   try { await navigator.clipboard.writeText(text); el.textContent = t().copied; el.className = "status ok"; }
   catch { el.textContent = t().copyFail; el.className = "status"; }
 }
+document.addEventListener("change", (e) => {
+  const end = e.target.dataset?.range;
+  if (!end) return;
+  const r = state.range, y = Number(e.target.value);
+  r[end] = y;
+  if (r.from > r.to) { if (end === "from") r.to = y; else r.from = y; }
+  save(); render();
+});
 document.addEventListener("change", (e) => { const f = e.target.dataset?.field; if (f) { picker[f] = e.target.value; renderPicker(); } });
 
 render();
