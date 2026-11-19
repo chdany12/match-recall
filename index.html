@@ -210,6 +210,7 @@ footer { font-size: 0.75rem; color: var(--haze); border-top: 1px solid var(--rul
   @keyframes pop { from { transform: translateY(4px); opacity: 0.2; } to { transform: none; opacity: 1; } }
 }
 </style>
+<script data-goatcounter="https://matchrecall.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -484,6 +485,7 @@ function startRun(modeId) {
   state.seen[modeId] = [...seen, ...ids.map((i) => GAMES[i].id)];
   state.run = { mode: modeId, range: { ...state.range }, ids, q: 0, answers: ids.map(() => ({ grid: [], done: false, gaveUp: false })) };
   state.screen = "play";
+  track(`start-${modeId}`);
   resetPicker();
   save(); render(); window.scrollTo({ top: 0 });
 }
@@ -515,6 +517,8 @@ const dotClass = (a) => (!a.done ? "" : !solved(a) ? "miss" : a.grid.length <= 3
 
 // ---- Rendering ----------------------------------------------------------
 const $ = (sel, el = document) => el.querySelector(sel);
+// Play counts for the public site. GoatCounter's script is added only to the GitHub Pages build; elsewhere this does nothing.
+const track = (name) => { try { window.goatcounter?.count?.({ path: name, title: name, event: true }); } catch {} };
 const reportUrl = (g, m) => "https://github.com/chdany12/match-recall/issues/new?" + new URLSearchParams({ title: `[${g.id}] ${STR.en.answerLabel(m)}: ${m.winnerName} vs ${m.loserName}`, body: `${t().reportBody}---\nGame: ${g.id} · ${STR.en.answerLabel(m)}` });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -682,7 +686,7 @@ document.addEventListener("click", (e) => {
   if (id === "next-btn") {
     const run = state.run;
     if (run.q < run.ids.length - 1) { run.q++; resetPicker(); }
-    else state.screen = "results";
+    else { state.screen = "results"; track(`finish-${run.mode}`); }
     save(); render(); window.scrollTo({ top: 0 }); return;
   }
   if (id === "all-years") { state.range = { ...FULL_RANGE }; save(); render(); return; }
