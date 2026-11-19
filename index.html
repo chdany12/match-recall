@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Match Recall</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Guess the pro League of Legends series from its draft, bans and builds. Every wrong guess opens another clue.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Match Recall">
+<meta property="og:title" content="Match Recall: which pro game was this?">
+<meta property="og:description" content="Guess the pro League of Legends series from its draft, bans and builds. Every wrong guess opens another clue.">
+<meta property="og:url" content="https://chdany12.github.io/match-recall/">
+<meta property="og:image" content="https://chdany12.github.io/match-recall/og-en.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=Gothic+A1:wght@400;500;700&display=swap">
 <style>
@@ -188,6 +198,9 @@ table.guesses td.label { color: var(--haze); background: transparent; border: 1p
 .qdot { width: 26px; height: 26px; border-radius: 2px; color: var(--on-state); display: grid; place-items: center; font: 700 1rem var(--display); }
 .qlist .qres { font: 600 1.05rem var(--display); color: var(--haze); white-space: nowrap; }
 .share { white-space: pre; background: var(--deck); padding: 12px; font-size: 0.92rem; overflow-x: auto; }
+footer a, .report { color: var(--haze); text-decoration: underline; text-underline-offset: 2px; }
+footer a:hover, .report:hover { color: var(--chalk); }
+.report { font-size: 0.85rem; justify-self: start; }
 footer { font-size: 0.75rem; color: var(--haze); border-top: 1px solid var(--rule); padding-top: 14px; max-width: 46rem; }
 
 @media (max-width: 880px) { .game { grid-template-columns: 1fr; } }
@@ -246,7 +259,8 @@ const STR = {
     roundOver: "Round complete", points: "points",
     again: "Play again", other: "Other modes", copy: "Copy result", copied: "Copied. Paste it into a message.", copyFail: "Couldn't copy. Select the text above.",
     resultLine: (n, solved) => (solved ? `${n} guess${n === 1 ? "" : "es"}` : "missed"),
-    footer: "Game data from Leaguepedia (lol.fandom.com, CC BY-SA). A free fan project, not endorsed by Riot Games. League of Legends is a trademark of Riot Games, Inc.",
+    footer: `Game data from Leaguepedia (lol.fandom.com, CC BY-SA). Champion and item images from Riot Games' Data Dragon. Match Recall isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, and all associated properties are trademarks or registered trademarks of Riot Games, Inc. · <a href="https://github.com/chdany12/match-recall/issues/new" target="_blank" rel="noopener">Send feedback</a>`,
+    report: "Something wrong in this game? Report it", reportBody: "What's wrong? (the answer, a clue, the trivia…)\n\n",
     hint: { draft: "Draft", bans: "Bans", series: "Series picks & bans", items: "Items at the end", loserAce: "Losing team's ace", winnerAce: "Winning team's ace", trivia: "Trivia" },
     blue: "Blue side", red: "Red side", mostPicked: "Most picked", mostBanned: "Most banned",
     across: (n) => (n === 1 ? "From this one game." : `Across the ${n}-game series.`),
@@ -281,7 +295,8 @@ const STR = {
     roundOver: "라운드 종료", points: "점",
     again: "다시 하기", other: "다른 모드", copy: "결과 복사", copied: "복사했습니다. 카톡이나 메시지에 붙여 넣어 보세요.", copyFail: "복사하지 못했습니다. 위 글을 직접 선택해서 복사해 주세요.",
     resultLine: (n, solved) => (solved ? `${n}번` : "실패"),
-    footer: "경기 데이터: Leaguepedia (lol.fandom.com, CC BY-SA). 무료 팬 프로젝트이며 Riot Games의 보증을 받지 않았습니다. League of Legends는 Riot Games, Inc.의 상표입니다.",
+    footer: `경기 데이터: Leaguepedia (lol.fandom.com, CC BY-SA). 챔피언·아이템 이미지: Riot Games Data Dragon. Match Recall은 Riot Games의 보증을 받지 않았으며, Riot Games 또는 Riot Games 자산의 제작·관리에 공식적으로 관여하는 누구의 견해나 의견도 반영하지 않습니다. Riot Games 및 모든 관련 자산은 Riot Games, Inc.의 상표 또는 등록 상표입니다. · <a href="https://github.com/chdany12/match-recall/issues/new" target="_blank" rel="noopener">의견 보내기</a>`,
+    report: "이 문제에 틀린 정보가 있나요? 제보하기", reportBody: "어떤 부분이 틀렸나요? (정답, 힌트, 트리비아 등)\n\n",
     hint: { draft: "픽", bans: "밴", series: "시리즈 픽·밴", items: "최종 아이템", loserAce: "패배 팀 에이스", winnerAce: "승리 팀 에이스", trivia: "추가 정보" },
     blue: "블루 진영", red: "레드 진영", mostPicked: "최다 픽", mostBanned: "최다 밴",
     across: (n) => (n === 1 ? "이 한 경기 기준." : `${n}세트 시리즈 전체 기준.`),
@@ -500,6 +515,7 @@ const dotClass = (a) => (!a.done ? "" : !solved(a) ? "miss" : a.grid.length <= 3
 
 // ---- Rendering ----------------------------------------------------------
 const $ = (sel, el = document) => el.querySelector(sel);
+const reportUrl = (g, m) => "https://github.com/chdany12/match-recall/issues/new?" + new URLSearchParams({ title: `[${g.id}] ${STR.en.answerLabel(m)}: ${m.winnerName} vs ${m.loserName}`, body: `${t().reportBody}---\nGame: ${g.id} · ${STR.en.answerLabel(m)}` });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
@@ -603,7 +619,8 @@ function renderPlay() {
   const result = !a.done ? "" : `<div class="result${solved(a) ? "" : " gave-up"}">
     <p class="verdict">${solved(a) ? T.solvedIn(a.grid.length) : a.grid.length >= MAX_GUESSES ? T.outOf : T.theAnswer}</p>
     <h3>${esc(T.answerLabel(m))}</h3><p>${esc(T.beat(m.winnerName, m.loserName))}</p>
-    <div class="actions"><button class="btn" id="next-btn">${last ? T.seeResults : T.next}</button></div></div>`;
+    <div class="actions"><button class="btn" id="next-btn">${last ? T.seeResults : T.next}</button></div>
+    <a class="report" href="${esc(reportUrl(g, m))}" target="_blank" rel="noopener">${T.report}</a></div>`;
   const giveUp = a.done ? "" : `<div class="actions"><button class="btn ghost" id="give-up">${T.giveUp}</button></div>`;
   return `${head}<div class="game"><section class="board" aria-label="Your guesses">${result}${form}
     <div class="grid-wrap"><table class="guesses"><thead><tr>${cols.map((c) => `<th>${T[c.key]}</th>`).join("")}</tr></thead>
@@ -634,7 +651,7 @@ function renderResults() {
 function render() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
-  $("#footer").textContent = t().footer;
+  $("#footer").innerHTML = t().footer;
   const screen = state.run ? state.screen : "home";
   $("#stage").innerHTML = screen === "play" ? renderPlay() : screen === "results" ? renderResults() : renderHome();
   if (screen === "play") renderPicker();
